@@ -11,23 +11,26 @@ import {
   LogOut,
   Edit2,
   Lock,
-  Mail
+  Mail,
+  AlertTriangle,
+  RotateCcw
 } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
+import { db, auth } from '../lib/firebase';
 import { 
   doc, 
   collection, 
   onSnapshot, 
   updateDoc, 
   setDoc, 
-  getDoc,
   query,
   orderBy,
   limit,
-  deleteDoc
+  deleteDoc,
+  writeBatch,
+  getDocs,
+  serverTimestamp
 } from 'firebase/firestore';
-import { signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged } from 'firebase/auth';
 
 interface Message {
   id: string;
@@ -35,8 +38,6 @@ interface Message {
   createdAt: any;
   status: 'pending' | 'approved';
 }
-
-const ADMIN_EMAIL = "e0l3mdj6eua7l@gmail.com";
 
 export default function AdminPanel({ onLogout }: { onLogout: () => void }) {
   const [password, setPassword] = useState("");
@@ -50,6 +51,7 @@ export default function AdminPanel({ onLogout }: { onLogout: () => void }) {
   const [bioText, setBioText] = useState("");
   const [isEditingBio, setIsEditingBio] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
 
   const ADMIN_PASSWORD = "01010694146";
 
@@ -121,7 +123,7 @@ export default function AdminPanel({ onLogout }: { onLogout: () => void }) {
         await updateDoc(doc(db, 'messages', id), { status });
       }
     } catch (err) {
-      console.error("Permission error (Rules might need update):", err);
+      console.error("Permission error:", err);
     }
   };
 
@@ -131,6 +133,60 @@ export default function AdminPanel({ onLogout }: { onLogout: () => void }) {
       setIsEditingBio(false);
     } catch (err) {
       console.error("Permission error:", err);
+    }
+  };
+
+  // --- Reset Actions ---
+  const [showConfirm, setShowConfirm] = useState<string | null>(null);
+  
+  const resetAmenCount = async () => {
+    setActionLoading('amen');
+    try {
+      await updateDoc(doc(db, 'stats', 'global'), { amenCount: 0 });
+      setShowConfirm(null);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const startNewKhatma = async () => {
+    setActionLoading('khatma');
+    try {
+      const batch = writeBatch(db);
+      for (let i = 1; i <= 30; i++) {
+        batch.set(doc(db, 'parts', i.toString()), {
+          status: 'available',
+          userName: '',
+          ownerId: '',
+          readCount: 0,
+          updatedAt: serverTimestamp()
+        }, { merge: true });
+      }
+      await batch.commit();
+      setShowConfirm(null);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const clearAllMessages = async () => {
+    setActionLoading('messages');
+    try {
+      const snapshot = await getDocs(collection(db, 'messages'));
+      const batch = writeBatch(db);
+      snapshot.docs.forEach((docSnap) => {
+        batch.delete(docSnap.ref);
+      });
+      await batch.commit();
+      setShowConfirm(null);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setActionLoading(null);
     }
   };
 
@@ -178,7 +234,10 @@ export default function AdminPanel({ onLogout }: { onLogout: () => void }) {
   return (
     <div className="space-y-12 pb-20">
       <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold gold-text">لوحة التحكم</h2>
+        <div className="flex items-center gap-3">
+          <h2 className="text-2xl font-bold gold-text">لوحة التحكم</h2>
+          <span className="px-3 py-1 bg-primary/10 text-primary text-[10px] font-bold rounded-full border border-primary/20">مسؤول</span>
+        </div>
         <button 
           onClick={handleAdminLogout}
           className="flex items-center gap-2 text-white/40 hover:text-red-400 transition-colors"
@@ -186,6 +245,81 @@ export default function AdminPanel({ onLogout }: { onLogout: () => void }) {
           <span>تسجيل الخروج</span>
           <LogOut className="w-4 h-4" />
         </button>
+      </div>
+
+      {/* Quick Actions / Reset Buttons */}
+      <div className="bg-red-500/5 border border-red-500/10 rounded-3xl p-6">
+        <div className="flex items-center gap-3 mb-6">
+          <AlertTriangle className="w-5 h-5 text-red-500" />
+          <h3 className="font-bold text-red-500">إجراءات سريعة (التصفير)</h3>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {/* Start New Khatma */}
+          <div className="relative">
+            {!showConfirm || showConfirm !== 'khatma' ? (
+              <button 
+                disabled={!!actionLoading}
+                onClick={() => setShowConfirm('khatma')}
+                className="w-full flex items-center justify-center gap-3 bg-white/5 border border-white/5 hover:bg-white/10 p-4 rounded-2xl transition-all active:scale-95 text-sm"
+              >
+                {actionLoading === 'khatma' ? <RefreshCw className="w-4 h-4 animate-spin" /> : <RotateCcw className="w-4 h-4 text-primary" />}
+                <span>بدء ختمة جديدة</span>
+              </button>
+            ) : (
+              <div className="bg-red-500/20 border border-red-500/20 p-2 rounded-2xl flex flex-col gap-2">
+                <p className="text-[10px] text-center text-red-400 font-bold px-2">هل أنت متأكد من تصفير الختمة؟</p>
+                <div className="flex gap-2">
+                  <button onClick={startNewKhatma} className="flex-1 bg-red-500 text-white text-[10px] py-2 rounded-xl font-bold">نعم، تصفير</button>
+                  <button onClick={() => setShowConfirm(null)} className="flex-1 bg-white/10 text-white text-[10px] py-2 rounded-xl">إلغاء</button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Reset Amen Count */}
+          <div className="relative">
+            {!showConfirm || showConfirm !== 'amen' ? (
+              <button 
+                disabled={!!actionLoading}
+                onClick={() => setShowConfirm('amen')}
+                className="w-full flex items-center justify-center gap-3 bg-white/5 border border-white/5 hover:bg-white/10 p-4 rounded-2xl transition-all active:scale-95 text-sm"
+              >
+                {actionLoading === 'amen' ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Users className="w-4 h-4 text-primary" />}
+                <span>تصفر عداد الأدعية</span>
+              </button>
+            ) : (
+              <div className="bg-red-500/20 border border-red-500/20 p-2 rounded-2xl flex flex-col gap-2">
+                <p className="text-[10px] text-center text-red-400 font-bold px-2">تصفير عداد الأدعية؟</p>
+                <div className="flex gap-2">
+                  <button onClick={resetAmenCount} className="flex-1 bg-red-500 text-white text-[10px] py-2 rounded-xl font-bold">تأكيد</button>
+                  <button onClick={() => setShowConfirm(null)} className="flex-1 bg-white/10 text-white text-[10px] py-2 rounded-xl">إلغاء</button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Clear Messages */}
+          <div className="relative">
+            {!showConfirm || showConfirm !== 'messages' ? (
+              <button 
+                disabled={!!actionLoading}
+                onClick={() => setShowConfirm('messages')}
+                className="w-full flex items-center justify-center gap-3 bg-white/5 border border-white/5 hover:bg-red-500/10 p-4 rounded-2xl transition-all active:scale-95 text-sm"
+              >
+                {actionLoading === 'messages' ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4 text-red-500" />}
+                <span className="text-red-500/80">حذف جميع الرسائل</span>
+              </button>
+            ) : (
+              <div className="bg-red-500/20 border border-red-500/20 p-2 rounded-2xl flex flex-col gap-2">
+                <p className="text-[10px] text-center text-red-400 font-bold px-2">حذف جميع الرسائل نهائياً؟</p>
+                <div className="flex gap-2">
+                  <button onClick={clearAllMessages} className="flex-1 bg-red-500 text-white text-[10px] py-2 rounded-xl font-bold">حذف الكل</button>
+                  <button onClick={() => setShowConfirm(null)} className="flex-1 bg-white/10 text-white text-[10px] py-2 rounded-xl">إلغاء</button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* Stats */}

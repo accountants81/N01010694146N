@@ -1,6 +1,6 @@
 import React, { useState, useEffect, memo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { CircleCheck, User, Lock, BookOpen } from 'lucide-react';
+import { CircleCheck, User, Lock, BookOpen, RefreshCw } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { db } from '../../lib/firebase';
 import { doc, collection, onSnapshot, setDoc, updateDoc, increment, serverTimestamp, writeBatch } from 'firebase/firestore';
@@ -109,6 +109,8 @@ export default function Quran() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const [processingId, setProcessingId] = useState<number | null>(null);
+
   // Sync parts status
   useEffect(() => {
     let fired = false;
@@ -170,24 +172,22 @@ export default function Quran() {
     return () => unsub();
   }, []);
 
-  const handlePartClick = useCallback((partId: number) => {
-    setParts(prev => {
-      const part = prev.find(p => p.id === partId);
-      if (!part) return prev;
-      if (part.status === 'available') {
-        setShowReservationModal(partId);
-      } else {
-        setShowInfoModal(partId);
-      }
-      return prev;
-    });
-  }, []);
+  const handlePartClick = (partId: number) => {
+    const part = parts.find(p => p.id === partId);
+    if (!part) return;
+    if (part.status === 'available') {
+      setShowReservationModal(partId);
+    } else {
+      setShowInfoModal(partId);
+    }
+  };
 
   const confirmReservation = async () => {
     if (!reserveName.trim() || showReservationModal === null) return;
 
     const partId = showReservationModal;
     const path = `parts/${partId}`;
+    setProcessingId(partId);
     try {
       await setDoc(doc(db, 'parts', partId.toString()), {
         status: 'reserved' as const,
@@ -195,16 +195,19 @@ export default function Quran() {
         ownerId: userId,
         readCount: 0,
         updatedAt: serverTimestamp()
-      });
-      setShowReservationModal(null);
-      setReserveName('');
+      }, { merge: true });
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, path);
+    } finally {
+      setShowReservationModal(null);
+      setReserveName('');
+      setProcessingId(null);
     }
   };
 
   const cancelReservation = async (partId: number) => {
     const path = `parts/${partId}`;
+    setProcessingId(partId);
     try {
       await updateDoc(doc(db, 'parts', partId.toString()), {
         status: 'available' as const,
@@ -212,14 +215,17 @@ export default function Quran() {
         ownerId: '',
         updatedAt: serverTimestamp()
       });
-      setShowInfoModal(null);
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, path);
+    } finally {
+      setShowInfoModal(null);
+      setProcessingId(null);
     }
   };
 
   const markAsCompleted = async (partId: number) => {
     const path = `parts/${partId}`;
+    setProcessingId(partId);
     try {
       await updateDoc(doc(db, 'parts', partId.toString()), {
         status: 'completed' as const,
@@ -227,12 +233,12 @@ export default function Quran() {
         updatedAt: serverTimestamp()
       });
       
+      // Auto-reset khatma if all done
       const currentParts = [...parts];
       const updatedParts = currentParts.map(p => p.id === partId ? { ...p, status: 'completed' as const } : p);
       
       if (updatedParts.every(p => p.status === 'completed')) {
         const batch = writeBatch(db);
-        
         batch.update(doc(db, 'stats', 'global'), {
           completedKhatmas: increment(1)
         });
@@ -245,27 +251,30 @@ export default function Quran() {
             updatedAt: serverTimestamp()
           }, { merge: true });
         }
-        
         await batch.commit();
       }
-
-      setShowInfoModal(null);
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, path);
+    } finally {
+      setShowInfoModal(null);
+      setProcessingId(null);
     }
   };
 
   const undoCompletion = async (partId: number) => {
     const path = `parts/${partId}`;
+    setProcessingId(partId);
     try {
       await updateDoc(doc(db, 'parts', partId.toString()), {
         status: 'reserved' as const,
         readCount: increment(-1),
         updatedAt: serverTimestamp()
       });
-      setShowInfoModal(null);
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, path);
+    } finally {
+      setShowInfoModal(null);
+      setProcessingId(null);
     }
   };
 
@@ -371,14 +380,16 @@ export default function Quran() {
               
               <div className="flex gap-3">
                 <button 
+                  disabled={processingId !== null}
                   onClick={confirmReservation}
-                  className="flex-1 bg-primary text-bg font-bold py-3 rounded-xl hover:opacity-90 transition-opacity"
+                  className="flex-1 bg-primary text-bg font-bold py-3 rounded-xl hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2"
                 >
-                  تأكيد الحجز
+                  {processingId === showReservationModal ? <RefreshCw className="w-4 h-4 animate-spin" /> : 'تأكيد الحجز'}
                 </button>
                 <button 
+                  disabled={processingId !== null}
                   onClick={() => setShowReservationModal(null)}
-                  className="flex-1 bg-white/5 py-3 rounded-xl hover:bg-white/10 transition-colors"
+                  className="flex-1 bg-white/5 py-3 rounded-xl hover:bg-white/10 transition-colors disabled:opacity-50"
                 >
                   إلغاء
                 </button>
@@ -431,34 +442,37 @@ export default function Quran() {
                         <div className="grid gap-3">
                           {part.status === 'reserved' && (
                             <button 
+                              disabled={processingId !== null}
                               onClick={(e) => {
                                 e.stopPropagation();
                                 markAsCompleted(part.id);
                               }}
-                              className="w-full bg-primary text-bg font-bold py-3 rounded-xl hover:opacity-90 transition-opacity"
+                              className="w-full bg-primary text-bg font-bold py-3 rounded-xl hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2"
                             >
-                              تمت القراءة بنجاح
+                              {processingId === part.id ? <RefreshCw className="w-4 h-4 animate-spin" /> : 'تمت القراءة بنجاح'}
                             </button>
                           )}
                           {part.status === 'completed' && (
                             <button 
+                              disabled={processingId !== null}
                               onClick={(e) => {
                                 e.stopPropagation();
                                 undoCompletion(part.id);
                               }}
-                              className="w-full bg-white/10 text-white/80 font-bold py-3 rounded-xl hover:bg-white/20 transition-all"
+                              className="w-full bg-white/10 text-white/80 font-bold py-3 rounded-xl hover:bg-white/20 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
                             >
-                              تراجع عن الإتمام
+                              {processingId === part.id ? <RefreshCw className="w-4 h-4 animate-spin" /> : 'تراجع عن الإتمام'}
                             </button>
                           )}
                           <button 
+                            disabled={processingId !== null}
                             onClick={(e) => {
                               e.stopPropagation();
                               cancelReservation(part.id);
                             }}
-                            className="w-full bg-red-500/10 text-red-400 font-medium py-3 rounded-xl hover:bg-red-500/20 transition-all"
+                            className="w-full bg-red-500/10 text-red-400 font-medium py-3 rounded-xl hover:bg-red-500/20 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
                           >
-                            إلغاء الحجز
+                            {processingId === part.id ? <RefreshCw className="w-4 h-4 animate-spin" /> : 'إلغاء الحجز'}
                           </button>
                         </div>
                       )}
