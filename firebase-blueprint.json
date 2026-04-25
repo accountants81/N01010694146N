@@ -1,0 +1,65 @@
+{
+  "entities": {
+    "PartReservation": {
+      "title": "Part Reservation",
+      "description": "Represents the status of a specific Quran part.",
+      "type": "object",
+      "properties": {
+        "status": { "type": "string", "enum": ["available", "reserved", "completed"] },
+        "userName": { "type": "string", "description": "The name of the person who reserved/completed it" },
+        "ownerId": { "type": "string", "description": "Local storage user ID for basic ownership" },
+        "readCount": { "type": "integer", "description": "Number of times this part has been completed" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["status", "updatedAt"]
+    },
+    "Stats": {
+      "title": "Stats",
+      "description": "Global application stats.",
+      "type": "object",
+      "properties": {
+        "amenCount": { "type": "integer", "description": "Total number of people who said Amen" },
+        "completedKhatmas": { "type": "integer", "description": "Total completed khatmas" }
+      },
+      "required": ["amenCount", "completedKhatmas"]
+    },
+    "VisitorMessage": {
+      "title": "Visitor Message",
+      "description": "A message left by a visitor.",
+      "type": "object",
+      "properties": {
+        "text": { "type": "string", "description": "The message content" },
+        "status": { "type": "string", "enum": ["pending", "approved"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["text", "status", "createdAt"]
+    },
+    "AppConfig": {
+      "title": "App Config",
+      "description": "Dynamic configuration for the app (e.g. bio).",
+      "type": "object",
+      "properties": {
+        "bio": { "type": "string", "description": "The biography text" }
+      },
+      "required": ["bio"]
+    }
+  },
+  "firestore": {
+    "/parts/{partId}": {
+      "schema": "PartReservation",
+      "description": "Collection of Quran parts and their current status."
+    },
+    "/stats/global": {
+      "schema": "Stats",
+      "description": "Global counters for the application."
+    },
+    "/messages/{messageId}": {
+      "schema": "VisitorMessage",
+      "description": "Messages from visitors seeking to express condolences."
+    },
+    "/config/general": {
+      "schema": "AppConfig",
+      "description": "General settings and content."
+    }
+  }
+}

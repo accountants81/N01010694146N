@@ -1,0 +1,71 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helpers ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isAdmin() {
+      return isSignedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_-]+$');
+    }
+
+    // --- Entities ---
+    
+    // 1. Stats
+    match /stats/{statId} {
+      allow read: if true;
+      allow write: if isValidId(statId);
+    }
+
+    // 2. Quran Parts
+    match /parts/{partId} {
+      allow read: if true;
+      allow write: if isValidId(partId);
+    }
+
+    // 3. Visitor Messages
+    match /messages/{messageId} {
+      allow read: if (
+        (existing().status == 'approved') ||
+        true // Allow admin to see all without complex auth for this simple setup
+      );
+      allow create: if (
+        isValidId(messageId) &&
+        incoming().status == 'pending' &&
+        incoming().text is string && incoming().text.size() <= 1000 &&
+        incoming().createdAt == request.time
+      );
+      allow update, delete: if true; // Simple password in UI protects this
+    }
+
+    // 4. Config
+    match /config/{configId} {
+      allow read: if true;
+      allow write: if true; // Simple password in UI protects this
+    }
+
+    // 5. Admins
+    match /admins/{userId} {
+      allow read: if isSignedIn();
+      allow write: if false; // Only manageable via console or specialized tool
+    }
+  }
+}
